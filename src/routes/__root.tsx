@@ -8,7 +8,6 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
-import { AppGate } from "@/components/AppGate";
 
 import appCss from "../styles.css?url";
 
@@ -48,11 +47,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "KnowledgeHub AI — Research notebook" },
+      { title: "KnowledgeHub AI" },
       { name: "description", content: "A premium AI research notebook. Upload documents, ask questions, and explore grounded citations." },
       { property: "og:title", content: "KnowledgeHub AI" },
-      { property: "og:description", content: "A premium AI research notebook with grounded retrieval-augmented answers." },
+      { property: "og:description", content: "A premium AI research notebook. Upload documents, ask questions, and explore grounded citations." },
       { property: "og:type", content: "website" },
+      { name: "twitter:title", content: "KnowledgeHub AI" },
+      { name: "twitter:description", content: "A premium AI research notebook. Upload documents, ask questions, and explore grounded citations." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d0e6ac8a-04b1-4d85-94a9-3cad12c1df22" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d0e6ac8a-04b1-4d85-94a9-3cad12c1df22" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -80,9 +84,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <AppGate>
-        <Outlet />
-      </AppGate>
+      <Outlet />
       <Toaster position="bottom-right" />
     </QueryClientProvider>
   );
