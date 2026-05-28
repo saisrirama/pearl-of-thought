@@ -1,10 +1,5 @@
-// Client-side PDF text extraction with pdfjs-dist.
-// Returns one string per page so we can preserve page numbers for citations.
-import * as pdfjsLib from "pdfjs-dist";
-// Bundle worker as a URL via Vite
-import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+// Client-only PDF text extraction. pdfjs-dist references DOMMatrix (browser-only),
+// so we lazy-import it inside the function to keep SSR safe.
 
 export interface PageText {
   page: number;
@@ -12,6 +7,10 @@ export interface PageText {
 }
 
 export async function extractPdfPages(file: File): Promise<PageText[]> {
+  const pdfjsLib = await import("pdfjs-dist");
+  const workerSrc = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const pages: PageText[] = [];
@@ -19,7 +18,7 @@ export async function extractPdfPages(file: File): Promise<PageText[]> {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     const text = content.items
-      .map((it: any) => ("str" in it ? it.str : ""))
+      .map((it: unknown) => (it && typeof it === "object" && "str" in it ? (it as { str: string }).str : ""))
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
@@ -28,7 +27,6 @@ export async function extractPdfPages(file: File): Promise<PageText[]> {
   return pages;
 }
 
-// Semantic-ish chunker: ~800 chars w/ 100 overlap, splits on sentence boundaries when possible.
 export interface Chunk {
   page: number;
   index: number;
@@ -43,7 +41,6 @@ export function chunkPages(pages: PageText[], size = 800, overlap = 100): Chunk[
     let start = 0;
     while (start < text.length) {
       let end = Math.min(start + size, text.length);
-      // try to end on a sentence boundary
       if (end < text.length) {
         const slice = text.slice(start, end + 100);
         const m = slice.match(/[.!?]\s/g);
