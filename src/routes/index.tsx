@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import {
@@ -15,6 +15,11 @@ import {
   BookOpen,
   X,
   ArrowUpDown,
+  UserCircle2,
+  LogOut,
+  Library,
+  MessagesSquare,
+  Quote,
 } from "lucide-react";
 import {
   ingestDocument,
@@ -24,8 +29,11 @@ import {
   askQuestion,
   listMessages,
   clearConversation,
+  getProfile,
+  deleteAccount,
   type Citation,
 } from "@/lib/rag.functions";
+import { signOut } from "@/lib/auth-helpers";
 import { extractPdfPages, chunkPages } from "@/lib/pdf-client";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +44,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Upload PDFs, ask grounded questions, and explore semantic citations. A premium AI research notebook powered by real RAG.",
+          "Upload PDFs, ask grounded questions, and explore semantic citations. A premium AI research notebook.",
       },
     ],
   }),
@@ -45,6 +53,8 @@ export const Route = createFileRoute("/")({
 
 type Doc = Awaited<ReturnType<typeof listDocuments>>[number];
 type Msg = Awaited<ReturnType<typeof listMessages>>[number];
+
+type MobileTab = "sources" | "notebook" | "refs";
 
 function KnowledgeHub() {
   const qc = useQueryClient();
@@ -57,30 +67,42 @@ function KnowledgeHub() {
   const docs = docsQ.data ?? [];
   const messages = msgsQ.data ?? [];
 
-  // Active citations: from the most recent assistant message
   const activeCitations: Citation[] = useMemo(() => {
     const last = [...messages].reverse().find((m) => m.role === "assistant");
     return (last?.citations as unknown as Citation[]) ?? [];
   }, [messages]);
 
   const [openCitation, setOpenCitation] = useState<Citation | null>(null);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("notebook");
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-[100dvh] flex-col bg-background text-foreground">
       <Header onClear={() => qc.invalidateQueries()} hasMessages={messages.length > 0} />
-      <div className="grid flex-1 min-h-0 grid-cols-1 gap-3 px-3 pb-3 md:grid-cols-[320px_minmax(0,1fr)_340px]">
+
+      {/* Desktop / tablet (>= md): 3-column grid */}
+      <div className="hidden flex-1 min-h-0 gap-3 px-3 pb-3 md:grid md:grid-cols-[280px_minmax(0,1fr)_300px] lg:grid-cols-[320px_minmax(0,1fr)_340px]">
         <SourcesPanel docs={docs} loading={docsQ.isLoading} />
-        <NotebookPanel
-          docs={docs}
-          messages={messages}
-          onCitationClick={setOpenCitation}
-        />
-        <CitationsPanel
-          citations={activeCitations}
-          openCitation={openCitation}
-          onSelect={setOpenCitation}
-        />
+        <NotebookPanel docs={docs} messages={messages} onCitationClick={setOpenCitation} />
+        <CitationsPanel citations={activeCitations} openCitation={openCitation} onSelect={setOpenCitation} />
       </div>
+
+      {/* Mobile (< md): single panel + bottom tab bar */}
+      <div className="flex flex-1 min-h-0 flex-col gap-3 px-3 pb-20 md:hidden">
+        {mobileTab === "sources" && <SourcesPanel docs={docs} loading={docsQ.isLoading} />}
+        {mobileTab === "notebook" && (
+          <NotebookPanel docs={docs} messages={messages} onCitationClick={(c) => { setOpenCitation(c); setMobileTab("refs"); }} />
+        )}
+        {mobileTab === "refs" && (
+          <CitationsPanel citations={activeCitations} openCitation={openCitation} onSelect={setOpenCitation} />
+        )}
+      </div>
+
+      <MobileTabBar
+        active={mobileTab}
+        onChange={setMobileTab}
+        sourceCount={docs.length}
+        refCount={activeCitations.length}
+      />
     </div>
   );
 }
@@ -89,19 +111,19 @@ function KnowledgeHub() {
 function Header({ onClear, hasMessages }: { onClear: () => void; hasMessages: boolean }) {
   const clearFn = useServerFn(clearConversation);
   return (
-    <header className="flex items-center justify-between px-5 py-3.5">
-      <div className="flex items-center gap-2.5">
-        <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+    <header className="flex items-center justify-between gap-2 px-4 py-3 sm:px-5 sm:py-3.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
           <BookOpen className="h-4 w-4" />
         </div>
-        <div>
+        <div className="min-w-0">
           <h1 className="font-serif text-lg leading-none">KnowledgeHub</h1>
           <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
             Research notebook
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {hasMessages && (
           <button
             onClick={async () => {
@@ -109,13 +131,128 @@ function Header({ onClear, hasMessages }: { onClear: () => void; hasMessages: bo
               onClear();
               toast.success("Conversation cleared");
             }}
-            className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="hidden rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-block"
           >
             Clear conversation
           </button>
         )}
+        <AccountMenu />
       </div>
     </header>
+  );
+}
+
+function AccountMenu() {
+  const fetchProfile = useServerFn(getProfile);
+  const deleteAcctFn = useServerFn(deleteAccount);
+  const [open, setOpen] = useState(false);
+  const profileQ = useQuery({ queryKey: ["profile"], queryFn: () => fetchProfile() });
+  const profile = profileQ.data;
+
+  const initials = profile
+    ? `${profile.first_name?.[0] ?? ""}${profile.last_name?.[0] ?? ""}`.toUpperCase() || "?"
+    : "?";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = () => setOpen(false);
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, [open]);
+
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="grid h-8 w-8 place-items-center rounded-full bg-secondary text-xs font-medium text-foreground hover:bg-accent"
+        aria-label="Account"
+      >
+        {initials}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-10 z-30 w-60 rounded-xl border border-border bg-card p-2 shadow-panel">
+          <div className="px-3 py-2">
+            <p className="text-sm font-medium">
+              {profile ? `${profile.first_name} ${profile.last_name}` : "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">@{profile?.username ?? ""}</p>
+          </div>
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={async () => {
+              await signOut();
+              toast.success("Signed out");
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-secondary"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+          <button
+            onClick={async () => {
+              if (!confirm("Delete your account? This permanently removes your documents and conversations.")) return;
+              try {
+                await deleteAcctFn();
+                await signOut();
+                toast.success("Account deleted");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Failed to delete account");
+              }
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete account
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileTabBar({
+  active,
+  onChange,
+  sourceCount,
+  refCount,
+}: {
+  active: MobileTab;
+  onChange: (t: MobileTab) => void;
+  sourceCount: number;
+  refCount: number;
+}) {
+  const tabs: Array<{ id: MobileTab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }> = [
+    { id: "sources", label: "Sources", icon: Library, count: sourceCount },
+    { id: "notebook", label: "Notebook", icon: MessagesSquare },
+    { id: "refs", label: "Refs", icon: Quote, count: refCount },
+  ];
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-3 border-t border-border bg-surface/95 backdrop-blur md:hidden">
+      {tabs.map((t) => {
+        const Icon = t.icon;
+        const isActive = active === t.id;
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            className={cn(
+              "flex flex-col items-center gap-0.5 py-2.5 text-[10px] uppercase tracking-wide",
+              isActive ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <div className="relative">
+              <Icon className="h-4 w-4" />
+              {typeof t.count === "number" && t.count > 0 && (
+                <span className="absolute -right-2 -top-1 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-primary px-1 text-[9px] leading-none text-primary-foreground">
+                  {t.count}
+                </span>
+              )}
+            </div>
+            {t.label}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -183,7 +320,7 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
   };
 
   return (
-    <aside className="flex min-h-0 flex-col rounded-2xl border border-border bg-surface shadow-panel">
+    <aside className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border bg-surface shadow-panel md:flex-none">
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
         <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Sources
@@ -191,7 +328,6 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
         <span className="text-[11px] text-muted-foreground">{docs.length}</span>
       </div>
 
-      {/* Upload zone */}
       <label
         onDragOver={(e) => {
           e.preventDefault();
@@ -208,7 +344,7 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
           <Upload className="h-4 w-4" />
         </div>
         <p className="mt-2 text-sm">Drop a PDF or click to upload</p>
-        <p className="text-[11px] text-muted-foreground">Parsed locally, embedded with pgvector</p>
+        <p className="text-[11px] text-muted-foreground">Parsed locally, embedded for semantic search</p>
         <input
           type="file"
           accept="application/pdf"
@@ -218,7 +354,6 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
         />
       </label>
 
-      {/* Search */}
       <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm">
         <Search className="h-3.5 w-3.5 text-muted-foreground" />
         <input
@@ -227,12 +362,9 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
           placeholder="Search sources"
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        {docs.length > 1 && (
-          <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
+        {docs.length > 1 && <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />}
       </div>
 
-      {/* List */}
       <div className="mt-3 flex-1 overflow-y-auto px-3 pb-3">
         {loading && <p className="px-2 py-4 text-sm text-muted-foreground">Loading…</p>}
         {!loading && filtered.length === 0 && uploading.length === 0 && (
@@ -280,7 +412,7 @@ function SourcesPanel({ docs, loading }: { docs: Doc[]; loading: boolean }) {
                 qc.invalidateQueries({ queryKey: ["docs"] });
                 toast.success("Source removed");
               }}
-              className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+              className="rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:bg-secondary hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
               aria-label="Remove source"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -318,15 +450,14 @@ function NotebookPanel({
   const hasSources = docs.length > 0;
 
   return (
-    <section className="flex min-h-0 flex-col rounded-2xl border border-border bg-surface-raised shadow-panel">
-      {/* Stream */}
-      <div className="flex-1 overflow-y-auto px-8 pt-8 pb-4 md:px-12 lg:px-16">
+    <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border bg-surface-raised shadow-panel md:flex-none">
+      <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 sm:px-8 md:pt-8 md:px-12 lg:px-16">
         <div className="mx-auto max-w-2xl">
-          <div className="mb-8">
+          <div className="mb-6 md:mb-8">
             <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
               Notebook
             </p>
-            <h1 className="font-serif text-3xl leading-tight">
+            <h1 className="font-serif text-2xl leading-tight sm:text-3xl">
               {hasSources
                 ? "Ask anything about your sources."
                 : "A quiet place to think with your documents."}
@@ -334,20 +465,18 @@ function NotebookPanel({
             <p className="mt-2 max-w-prose text-sm text-muted-foreground">
               {hasSources
                 ? "Answers are grounded in your uploaded documents and cited inline."
-                : "Upload a PDF in the left panel. We'll parse it, chunk it semantically, and embed it for retrieval."}
+                : "Upload a PDF in the Sources tab. We'll parse it, chunk it semantically, and embed it for retrieval."}
             </p>
           </div>
 
-          {/* Summaries */}
           {readyDocs.length > 0 && (
-            <div className="mb-8 grid gap-3 sm:grid-cols-2">
+            <div className="mb-6 grid gap-3 sm:mb-8 sm:grid-cols-2">
               {readyDocs.slice(0, 4).map((doc) => (
                 <SummaryCard key={doc.id} doc={doc} />
               ))}
             </div>
           )}
 
-          {/* Conversation */}
           <div className="space-y-6">
             {messages.map((m) => (
               <Message
@@ -368,8 +497,7 @@ function NotebookPanel({
         </div>
       </div>
 
-      {/* Composer */}
-      <div className="border-t border-border px-6 py-4 md:px-10 lg:px-14">
+      <div className="border-t border-border px-4 py-3 sm:px-6 sm:py-4 md:px-10 lg:px-14">
         <div className="mx-auto max-w-2xl">
           <form
             onSubmit={(e) => {
@@ -383,7 +511,7 @@ function NotebookPanel({
               setInput("");
               ask.mutate(m);
             }}
-            className="flex items-end gap-2 rounded-2xl border border-border bg-card px-4 py-3 shadow-float focus-within:border-primary/30"
+            className="flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 shadow-float focus-within:border-primary/30 sm:px-4 sm:py-3"
           >
             <textarea
               value={input}
@@ -401,7 +529,7 @@ function NotebookPanel({
             <button
               type="submit"
               disabled={!input.trim() || ask.isPending}
-              className="grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-30"
+              className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-30"
               aria-label="Send"
             >
               {ask.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -418,8 +546,9 @@ function NotebookPanel({
 
 function SummaryCard({ doc }: { doc: Doc }) {
   const keyPoints = (doc.key_points as unknown as string[]) ?? [];
+  const [expanded, setExpanded] = useState(false);
   return (
-    <article className="rounded-xl border border-border bg-card p-4 shadow-float">
+    <article className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-float">
       <div className="flex items-center gap-2">
         <Sparkles className="h-3 w-3 text-citation" />
         <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -430,19 +559,32 @@ function SummaryCard({ doc }: { doc: Doc }) {
         {doc.filename}
       </h3>
       {doc.summary && (
-        <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-foreground/80">
+        <div
+          className={cn(
+            "mt-2 overflow-y-auto pr-1 text-[13px] leading-relaxed text-foreground/80",
+            expanded ? "max-h-72" : "max-h-24",
+          )}
+        >
           {doc.summary}
-        </p>
+        </div>
       )}
       {keyPoints.length > 0 && (
         <ul className="mt-3 space-y-1">
-          {keyPoints.slice(0, 3).map((p, i) => (
+          {keyPoints.slice(0, expanded ? keyPoints.length : 3).map((p, i) => (
             <li key={i} className="flex gap-2 text-[12px] text-muted-foreground">
               <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-citation/60" />
-              <span className="line-clamp-1">{p}</span>
+              <span className={expanded ? "" : "line-clamp-2"}>{p}</span>
             </li>
           ))}
         </ul>
+      )}
+      {(doc.summary || keyPoints.length > 3) && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-3 self-start text-[11px] font-medium text-citation hover:underline"
+        >
+          {expanded ? "Show less" : "Read full summary"}
+        </button>
       )}
     </article>
   );
@@ -468,8 +610,6 @@ function Message({
       </div>
     );
   }
-  // Assistant: render markdown, replace [n] tokens with citation pills
-  const parts = content.split(/(\[\d+\])/g);
   const byN = new Map(citations.map((c) => [c.n, c]));
   return (
     <div className="prose prose-sm max-w-none text-foreground prose-headings:font-serif prose-headings:font-normal prose-p:leading-relaxed prose-strong:text-foreground">
@@ -481,14 +621,6 @@ function Message({
       >
         {content}
       </ReactMarkdown>
-      {/* fallback rendering when markdown wraps everything */}
-      {parts.length > 1 && false && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {citations.map((c) => (
-            <CitationPill key={c.chunkId} c={c} onClick={() => onCitationClick(c)} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -539,7 +671,7 @@ function CitationsPanel({
   onSelect: (c: Citation | null) => void;
 }) {
   return (
-    <aside className="flex min-h-0 flex-col rounded-2xl border border-border bg-surface shadow-panel">
+    <aside className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border bg-surface shadow-panel md:flex-none">
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
         <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
           References
@@ -554,7 +686,6 @@ function CitationsPanel({
           </p>
         )}
 
-        {/* Pill row */}
         {citations.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">
             {citations.map((c) => (
@@ -575,16 +706,13 @@ function CitationsPanel({
           </div>
         )}
 
-        {/* Cards */}
         <div className="space-y-2">
           {(openCitation ? [openCitation] : citations).map((c) => (
             <article
               key={c.chunkId}
               className={cn(
                 "rounded-xl border bg-card p-3.5 text-[12.5px] shadow-float transition-all",
-                openCitation?.chunkId === c.chunkId
-                  ? "border-citation/40"
-                  : "border-border",
+                openCitation?.chunkId === c.chunkId ? "border-citation/40" : "border-border",
               )}
             >
               <div className="mb-2 flex items-start justify-between gap-2">
@@ -610,7 +738,7 @@ function CitationsPanel({
                   </button>
                 )}
               </div>
-              <p className="line-clamp-6 leading-relaxed text-foreground/80">{c.snippet}</p>
+              <p className="leading-relaxed text-foreground/80">{c.snippet}</p>
             </article>
           ))}
         </div>
