@@ -63,6 +63,7 @@ export type Database = {
           status: string
           storage_path: string | null
           summary: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string
@@ -74,6 +75,7 @@ export type Database = {
           status?: string
           storage_path?: string | null
           summary?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string
@@ -85,6 +87,7 @@ export type Database = {
           status?: string
           storage_path?: string | null
           summary?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -95,6 +98,7 @@ export type Database = {
           created_at: string
           id: string
           role: string
+          user_id: string
         }
         Insert: {
           citations?: Json | null
@@ -102,6 +106,7 @@ export type Database = {
           created_at?: string
           id?: string
           role: string
+          user_id: string
         }
         Update: {
           citations?: Json | null
@@ -109,6 +114,34 @@ export type Database = {
           created_at?: string
           id?: string
           role?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          first_name: string
+          id: string
+          last_name: string
+          user_id: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          first_name: string
+          id?: string
+          last_name: string
+          user_id: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          first_name?: string
+          id?: string
+          last_name?: string
+          user_id?: string
+          username?: string
         }
         Relationships: []
       }
