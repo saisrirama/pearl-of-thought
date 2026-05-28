@@ -217,3 +217,4 @@ Human review was still needed for product decisions, security trade-offs, enviro
 - PDF parsing happens in the browser, while embeddings, summaries, retrieval, and chat run in server functions.
 - Supabase stores profiles, documents, chunks, messages, auth data, and `vector(1536)` embeddings.
 - See [ARCHITECTURE.md](ARCHITECTURE.md) for additional design notes.
+- See [docs folder](docs/) for PRD and Technical Specification
