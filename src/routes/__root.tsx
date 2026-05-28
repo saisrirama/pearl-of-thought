@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthGate } from "@/components/AuthGate";
 
 import appCss from "../styles.css?url";
 
@@ -54,8 +55,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
       { name: "twitter:title", content: "KnowledgeHub AI" },
       { name: "twitter:description", content: "A premium AI research notebook. Upload documents, ask questions, and explore grounded citations." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d0e6ac8a-04b1-4d85-94a9-3cad12c1df22" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d0e6ac8a-04b1-4d85-94a9-3cad12c1df22" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
@@ -84,7 +83,9 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <AuthGate>
+        <Outlet />
+      </AuthGate>
       <Toaster position="bottom-right" />
     </QueryClientProvider>
   );

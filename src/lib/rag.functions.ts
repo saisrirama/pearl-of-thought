@@ -1,17 +1,17 @@
 // All RAG server functions: ingest, chat (retrieval + grounded generation), summarize, list, delete.
-// Uses Lovable AI Gateway for embeddings + chat, pgvector for retrieval, supabaseAdmin for DB writes.
+// Scoped per-authenticated-user.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const GATEWAY = "https://ai.gateway.lovable.dev/v1";
-const EMBED_MODEL = "openai/text-embedding-3-small"; // 1536 dims, matches vector(1536)
+const EMBED_MODEL = "openai/text-embedding-3-small";
 const CHAT_MODEL = "google/gemini-3-flash-preview";
 
 function apiKey() {
   const k = process.env.LOVABLE_API_KEY;
-  if (!k) throw new Error("LOVABLE_API_KEY is not configured");
+  if (!k) throw new Error("AI key is not configured");
   return k;
 }
 
@@ -38,14 +38,13 @@ async function chat(messages: Array<{ role: string; content: string }>): Promise
   if (!res.ok) {
     const t = await res.text();
     if (res.status === 429) throw new Error("Rate limited — please wait a moment.");
-    if (res.status === 402) throw new Error("AI credits exhausted. Add credits in Workspace settings.");
+    if (res.status === 402) throw new Error("AI credits exhausted.");
     throw new Error(`AI request failed (${res.status}): ${t.slice(0, 200)}`);
   }
   const json = await res.json();
   return json.choices?.[0]?.message?.content ?? "";
 }
 
-// ---------- INGEST ----------
 const IngestSchema = z.object({
   filename: z.string().min(1).max(300),
   storagePath: z.string().optional(),
@@ -63,12 +62,14 @@ const IngestSchema = z.object({
 });
 
 export const ingestDocument = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input) => IngestSchema.parse(input))
-  .handler(async ({ data }) => {
-    // 1. Create the document row
+  .handler(async ({ data, context }) => {
+    const userId = context.userId;
     const { data: doc, error: docErr } = await supabaseAdmin
       .from("documents")
       .insert({
+        user_id: userId,
         filename: data.filename,
         storage_path: data.storagePath ?? null,
         page_count: data.pageCount,
@@ -79,7 +80,6 @@ export const ingestDocument = createServerFn({ method: "POST" })
     if (docErr || !doc) throw new Error(docErr?.message ?? "Failed to create document");
 
     try {
-      // 2. Embed chunks in batches of 64
       const BATCH = 64;
       for (let i = 0; i < data.chunks.length; i += BATCH) {
         const batch = data.chunks.slice(i, i + BATCH);
@@ -95,7 +95,6 @@ export const ingestDocument = createServerFn({ method: "POST" })
         if (insErr) throw new Error(insErr.message);
       }
 
-      // 3. Summary from first ~8 chunks (covers intro / abstract)
       const head = data.chunks.slice(0, 8).map((c) => c.content).join("\n\n");
       const summaryRaw = await chat([
         {
@@ -123,65 +122,77 @@ export const ingestDocument = createServerFn({ method: "POST" })
 
       return { id: doc.id, status: "ready" as const, summary, keyPoints };
     } catch (e) {
-      await supabaseAdmin
-        .from("documents")
-        .update({ status: "error" })
-        .eq("id", doc.id);
+      await supabaseAdmin.from("documents").update({ status: "error" }).eq("id", doc.id);
       throw e;
     }
   });
 
-// ---------- LIST / DELETE ----------
 export const listDocuments = createServerFn({ method: "GET" })
-  .handler(async () => {
-  const { data, error } = await supabaseAdmin
-    .from("documents")
-    .select("id, filename, status, summary, key_points, page_count, position, created_at")
-    .order("position", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-});
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await supabaseAdmin
+      .from("documents")
+      .select("id, filename, status, summary, key_points, page_count, position, created_at")
+      .eq("user_id", context.userId)
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
 
 export const deleteDocument = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
-  .handler(async ({ data }) => {
-    const { error } = await supabaseAdmin.from("documents").delete().eq("id", data.id);
+  .handler(async ({ data, context }) => {
+    const { error } = await supabaseAdmin
+      .from("documents")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const reorderDocuments = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ ids: z.array(z.string().uuid()).max(500) }).parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     await Promise.all(
       data.ids.map((id, idx) =>
-        supabaseAdmin.from("documents").update({ position: idx }).eq("id", id),
+        supabaseAdmin
+          .from("documents")
+          .update({ position: idx })
+          .eq("id", id)
+          .eq("user_id", context.userId),
       ),
     );
     return { ok: true };
   });
 
-// ---------- MESSAGES ----------
 export const listMessages = createServerFn({ method: "GET" })
-  .handler(async () => {
-  const { data, error } = await supabaseAdmin
-    .from("messages")
-    .select("id, role, content, citations, created_at")
-    .order("created_at", { ascending: true })
-    .limit(200);
-  if (error) throw new Error(error.message);
-  return data ?? [];
-});
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await supabaseAdmin
+      .from("messages")
+      .select("id, role, content, citations, created_at")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: true })
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
 
 export const clearConversation = createServerFn({ method: "POST" })
-  .handler(async () => {
-  const { error } = await supabaseAdmin.from("messages").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  if (error) throw new Error(error.message);
-  return { ok: true };
-});
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error } = await supabaseAdmin
+      .from("messages")
+      .delete()
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
 
-// ---------- CHAT (real RAG) ----------
 const ChatSchema = z.object({
   message: z.string().min(1).max(4000),
   documentIds: z.array(z.string().uuid()).optional(),
@@ -198,26 +209,46 @@ export interface Citation {
 }
 
 export const askQuestion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input) => ChatSchema.parse(input))
-  .handler(async ({ data }) => {
-    // 1. Persist user message
-    await supabaseAdmin.from("messages").insert({ role: "user", content: data.message });
+  .handler(async ({ data, context }) => {
+    const userId = context.userId;
+    await supabaseAdmin.from("messages").insert({ user_id: userId, role: "user", content: data.message });
 
-    // 2. Conversation memory: last 10 messages for follow-ups
     const { data: history } = await supabaseAdmin
       .from("messages")
       .select("role, content")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(10);
     const conversation = (history ?? []).reverse();
 
-    // 3. Embed the question and retrieve top-k chunks
+    // Restrict retrieval to this user's documents
+    const { data: userDocs } = await supabaseAdmin
+      .from("documents")
+      .select("id")
+      .eq("user_id", userId);
+    const userDocIds = (userDocs ?? []).map((d) => d.id);
+    if (userDocIds.length === 0) {
+      const reply = "Upload a document first, then ask a question about it.";
+      const { data: stored } = await supabaseAdmin
+        .from("messages")
+        .insert({ user_id: userId, role: "assistant", content: reply, citations: [] })
+        .select()
+        .single();
+      return { message: stored, citations: [] as Citation[] };
+    }
+
+    const filterIds =
+      data.documentIds && data.documentIds.length > 0
+        ? data.documentIds.filter((id) => userDocIds.includes(id))
+        : userDocIds;
+
     const [queryVec] = await embed([data.message]);
     const { data: matches, error: matchErr } = await supabaseAdmin.rpc("match_chunks", {
       query_embedding: queryVec as unknown as string,
       match_count: 6,
-      doc_ids:
-        data.documentIds && data.documentIds.length > 0 ? (data.documentIds as string[]) : (undefined as unknown as string[]),
+      doc_ids: filterIds as string[],
     });
     if (matchErr) throw new Error(matchErr.message);
 
@@ -232,10 +263,10 @@ export const askQuestion = createServerFn({ method: "POST" })
 
     if (retrieved.length === 0) {
       const reply =
-        "I couldn't find anything in the uploaded documents that addresses that. Try rephrasing, or upload a source that covers this topic.";
+        "I couldn't find anything in your uploaded documents that addresses that. Try rephrasing, or upload a source that covers this topic.";
       const { data: stored } = await supabaseAdmin
         .from("messages")
-        .insert({ role: "assistant", content: reply, citations: [] })
+        .insert({ user_id: userId, role: "assistant", content: reply, citations: [] })
         .select()
         .single();
       return { message: stored, citations: [] as Citation[] };
@@ -251,8 +282,7 @@ export const askQuestion = createServerFn({ method: "POST" })
       similarity: r.similarity,
     }));
 
-    // 4. Build grounded prompt with numbered context
-    const context = citations
+    const context_str = citations
       .map((c) => `[${c.n}] (${c.filename}, p.${c.page})\n${c.snippet}`)
       .join("\n\n");
 
@@ -261,23 +291,20 @@ export const askQuestion = createServerFn({ method: "POST" })
     const messages = [
       { role: "system", content: system },
       ...conversation.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
-      {
-        role: "user",
-        content: `Context:\n${context}\n\nQuestion: ${data.message}`,
-      },
+      { role: "user", content: `Context:\n${context_str}\n\nQuestion: ${data.message}` },
     ];
 
     const answer = await chat(messages);
 
-    // 5. Only keep citations actually referenced in the answer
     const used = new Set<number>();
     for (const m of answer.matchAll(/\[(\d+)\]/g)) used.add(parseInt(m[1], 10));
     const finalCitations = citations.filter((c) => used.has(c.n));
-
     const finalList = finalCitations.length > 0 ? finalCitations : citations.slice(0, 3);
+
     const { data: stored } = await supabaseAdmin
       .from("messages")
       .insert({
+        user_id: userId,
         role: "assistant",
         content: answer,
         citations: finalList as unknown as never,
@@ -286,4 +313,25 @@ export const askQuestion = createServerFn({ method: "POST" })
       .single();
 
     return { message: stored, citations: finalList };
+  });
+
+// ---------- ACCOUNT ----------
+
+export const deleteAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const getProfile = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data } = await supabaseAdmin
+      .from("profiles")
+      .select("username, first_name, last_name")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    return data;
   });
