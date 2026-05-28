@@ -2,7 +2,6 @@
 // Returns one string per page so we can preserve page numbers for citations.
 import * as pdfjsLib from "pdfjs-dist";
 // Bundle worker as a URL via Vite
-// @ts-expect-error - pdfjs ships a worker entry
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
