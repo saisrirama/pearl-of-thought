@@ -3,6 +3,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { requireAppToken } from "@/lib/app-token-middleware";
+
 
 const GATEWAY = "https://ai.gateway.lovable.dev/v1";
 const EMBED_MODEL = "openai/text-embedding-3-small"; // 1536 dims, matches vector(1536)
