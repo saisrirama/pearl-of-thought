@@ -212,7 +212,8 @@ export const askQuestion = createServerFn({ method: "POST" })
     const { data: matches, error: matchErr } = await supabaseAdmin.rpc("match_chunks", {
       query_embedding: queryVec as unknown as string,
       match_count: 6,
-      doc_ids: data.documentIds && data.documentIds.length > 0 ? data.documentIds : null,
+      doc_ids:
+        data.documentIds && data.documentIds.length > 0 ? (data.documentIds as string[]) : (undefined as unknown as string[]),
     });
     if (matchErr) throw new Error(matchErr.message);
 
@@ -269,15 +270,16 @@ export const askQuestion = createServerFn({ method: "POST" })
     for (const m of answer.matchAll(/\[(\d+)\]/g)) used.add(parseInt(m[1], 10));
     const finalCitations = citations.filter((c) => used.has(c.n));
 
+    const finalList = finalCitations.length > 0 ? finalCitations : citations.slice(0, 3);
     const { data: stored } = await supabaseAdmin
       .from("messages")
       .insert({
         role: "assistant",
         content: answer,
-        citations: finalCitations.length > 0 ? finalCitations : citations.slice(0, 3),
+        citations: finalList as unknown as never,
       })
       .select()
       .single();
 
-    return { message: stored, citations: finalCitations.length > 0 ? finalCitations : citations.slice(0, 3) };
+    return { message: stored, citations: finalList };
   });
