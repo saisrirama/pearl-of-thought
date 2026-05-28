@@ -3,7 +3,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { requireAppToken } from "@/lib/app-token-middleware";
 
 
 const GATEWAY = "https://ai.gateway.lovable.dev/v1";
@@ -64,7 +63,6 @@ const IngestSchema = z.object({
 });
 
 export const ingestDocument = createServerFn({ method: "POST" })
-  .middleware([requireAppToken])
   .inputValidator((input) => IngestSchema.parse(input))
   .handler(async ({ data }) => {
     // 1. Create the document row
@@ -135,7 +133,6 @@ export const ingestDocument = createServerFn({ method: "POST" })
 
 // ---------- LIST / DELETE ----------
 export const listDocuments = createServerFn({ method: "GET" })
-  .middleware([requireAppToken])
   .handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("documents")
@@ -147,7 +144,6 @@ export const listDocuments = createServerFn({ method: "GET" })
 });
 
 export const deleteDocument = createServerFn({ method: "POST" })
-  .middleware([requireAppToken])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { error } = await supabaseAdmin.from("documents").delete().eq("id", data.id);
@@ -156,7 +152,6 @@ export const deleteDocument = createServerFn({ method: "POST" })
   });
 
 export const reorderDocuments = createServerFn({ method: "POST" })
-  .middleware([requireAppToken])
   .inputValidator((input) => z.object({ ids: z.array(z.string().uuid()).max(500) }).parse(input))
   .handler(async ({ data }) => {
     await Promise.all(
@@ -169,7 +164,6 @@ export const reorderDocuments = createServerFn({ method: "POST" })
 
 // ---------- MESSAGES ----------
 export const listMessages = createServerFn({ method: "GET" })
-  .middleware([requireAppToken])
   .handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("messages")
@@ -181,7 +175,6 @@ export const listMessages = createServerFn({ method: "GET" })
 });
 
 export const clearConversation = createServerFn({ method: "POST" })
-  .middleware([requireAppToken])
   .handler(async () => {
   const { error } = await supabaseAdmin.from("messages").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   if (error) throw new Error(error.message);
@@ -205,7 +198,6 @@ export interface Citation {
 }
 
 export const askQuestion = createServerFn({ method: "POST" })
-  .middleware([requireAppToken])
   .inputValidator((input) => ChatSchema.parse(input))
   .handler(async ({ data }) => {
     // 1. Persist user message
