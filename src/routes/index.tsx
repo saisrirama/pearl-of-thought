@@ -15,7 +15,7 @@ import {
   BookOpen,
   X,
   ArrowUpDown,
-  UserCircle2,
+  
   LogOut,
   Library,
   MessagesSquare,
