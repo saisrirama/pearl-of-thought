@@ -14,13 +14,125 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          document_id: string
+          embedding: string | null
+          id: string
+          page: number
+        }
+        Insert: {
+          chunk_index: number
+          content: string
+          created_at?: string
+          document_id: string
+          embedding?: string | null
+          id?: string
+          page?: number
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          embedding?: string | null
+          id?: string
+          page?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chunks_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          created_at: string
+          filename: string
+          id: string
+          key_points: Json | null
+          page_count: number | null
+          position: number
+          status: string
+          storage_path: string | null
+          summary: string | null
+        }
+        Insert: {
+          created_at?: string
+          filename: string
+          id?: string
+          key_points?: Json | null
+          page_count?: number | null
+          position?: number
+          status?: string
+          storage_path?: string | null
+          summary?: string | null
+        }
+        Update: {
+          created_at?: string
+          filename?: string
+          id?: string
+          key_points?: Json | null
+          page_count?: number | null
+          position?: number
+          status?: string
+          storage_path?: string | null
+          summary?: string | null
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          citations: Json | null
+          content: string
+          created_at: string
+          id: string
+          role: string
+        }
+        Insert: {
+          citations?: Json | null
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+        }
+        Update: {
+          citations?: Json | null
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_chunks: {
+        Args: {
+          doc_ids?: string[]
+          match_count?: number
+          query_embedding: string
+        }
+        Returns: {
+          chunk_index: number
+          content: string
+          document_id: string
+          filename: string
+          id: string
+          page: number
+          similarity: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
