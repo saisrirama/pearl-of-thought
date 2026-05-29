@@ -4,6 +4,9 @@ KnowledgeHub AI is a PDF research notebook that turns uploaded documents into se
 
 The app is built as a TanStack Start React application with server functions, Supabase Postgres + `pgvector`, Supabase Auth, browser-side PDF parsing, and Lovable AI Gateway for embeddings and chat completion.
 
+## Project Link
+https://pearl-of-thought.lovable.app/
+
 ## Quick Setup
 
 1. Install dependencies:
