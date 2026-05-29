@@ -7,6 +7,9 @@ The app is built as a TanStack Start React application with server functions, Su
 ## Project Link
 https://pearl-of-thought.lovable.app/
 
+## Demo Video
+https://drive.google.com/drive/folders/17EexPnRymSlCEkCSYf6OAsjQKb9hCHnL?usp=drive_link
+
 ## Quick Setup
 
 1. Install dependencies:
